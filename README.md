@@ -161,6 +161,7 @@ srvpulse/
 | 操作系统 | Linux（生产部署）/ Windows（开发调试） |
 | Python | 3.6 - 3.13+ |
 | Git | 服务器部署需要 |
+| 系统包 | Debian/Ubuntu 需 `python3-venv`（`deploy.sh` 会尝试自动安装） |
 | 网络 | 可访问 `open.feishu.cn` 和 `github.com` |
 | 权限 | Linux 部署需 root |
 

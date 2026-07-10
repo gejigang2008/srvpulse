@@ -62,6 +62,8 @@ if ! $PYTHON -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 6) el
     exit 1
 fi
 
+PYTHON_MAJOR_MINOR=$($PYTHON -c 'import sys; print("{}.{}".format(sys.version_info.major, sys.version_info.minor))')
+
 # ============ 安装目录检查 ============
 if [ ! -f "$INSTALL_DIR/monitor.py" ]; then
     echo_error "未找到 monitor.py，请在 srvpulse 仓库目录内运行本脚本"
@@ -72,11 +74,69 @@ chmod +x "$INSTALL_DIR/monitor.py"
 echo_info "安装目录: $INSTALL_DIR"
 
 # ============ Python 虚拟环境 ============
-if [ ! -d "$INSTALL_DIR/venv" ]; then
+install_venv_system_package() {
+    if command -v apt-get >/dev/null 2>&1; then
+        echo_info "安装系统包 python${PYTHON_MAJOR_MINOR}-venv ..."
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -qq
+        if apt-get install -y "python${PYTHON_MAJOR_MINOR}-venv"; then
+            return 0
+        fi
+        echo_warn "尝试安装通用包 python3-venv ..."
+        apt-get install -y python3-venv
+        return $?
+    fi
+
+    if command -v dnf >/dev/null 2>&1; then
+        echo_info "安装系统包 python3-virtualenv ..."
+        dnf install -y python3-virtualenv
+        return $?
+    fi
+
+    if command -v yum >/dev/null 2>&1; then
+        echo_info "安装系统包 python3-virtualenv ..."
+        yum install -y python3-virtualenv
+        return $?
+    fi
+
+    return 1
+}
+
+create_virtualenv() {
+    if [ -x "$INSTALL_DIR/venv/bin/python" ]; then
+        echo_info "虚拟环境已存在，跳过创建"
+        return
+    fi
+
+    if [ -d "$INSTALL_DIR/venv" ]; then
+        echo_warn "检测到不完整的 venv 目录，正在清理..."
+        rm -rf "$INSTALL_DIR/venv"
+    fi
+
     echo_info "创建 Python 虚拟环境..."
-    $PYTHON -m venv "$INSTALL_DIR/venv"
-else
-    echo_info "虚拟环境已存在，跳过创建"
+    if $PYTHON -m venv "$INSTALL_DIR/venv"; then
+        return
+    fi
+
+    echo_warn "虚拟环境创建失败（常见于 Debian/Ubuntu 未安装 python3-venv）"
+    if install_venv_system_package; then
+        echo_info "重试创建 Python 虚拟环境..."
+        if $PYTHON -m venv "$INSTALL_DIR/venv"; then
+            return
+        fi
+    fi
+
+    echo_error "无法创建虚拟环境，请手动安装后重新运行 deploy.sh:"
+    echo "  Debian/Ubuntu: apt install python${PYTHON_MAJOR_MINOR}-venv"
+    echo "  或:           apt install python3-venv"
+    exit 1
+}
+
+create_virtualenv
+
+if [ ! -x "$INSTALL_DIR/venv/bin/pip" ]; then
+    echo_error "venv 中未找到 pip，虚拟环境创建不完整"
+    exit 1
 fi
 
 echo_info "安装 Python 依赖..."
