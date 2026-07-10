@@ -95,7 +95,7 @@ else:
 INSTALL_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(INSTALL_DIR, "config.yaml")
 STATE_FILE = os.path.join(INSTALL_DIR, "state.json")
-SCRIPT_NAME = "monitor"
+SCRIPT_NAME = "srvpulse"
 
 VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR"}
 
