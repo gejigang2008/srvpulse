@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 # ============================================
 # srvpulse install script (run inside cloned repo)
 #
