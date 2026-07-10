@@ -41,6 +41,22 @@ echo_info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
 echo_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 echo_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
+read_tty() {
+    if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        read -r "$@" </dev/tty
+    else
+        read -r "$@"
+    fi
+}
+
+read_secret_tty() {
+    if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        read -rs "$@" </dev/tty
+    else
+        read -rs "$@"
+    fi
+}
+
 if [ "$EUID" -ne 0 ]; then
     echo_error "Please run as root: sudo ./deploy.sh"
     exit 1
@@ -103,9 +119,11 @@ setup_python_runtime() {
 
 setup_python_runtime
 
+CONFIG_JUST_CREATED=0
 if [ ! -f "$CONFIG_FILE" ]; then
     cp "$INSTALL_DIR/config.yaml.example" "$CONFIG_FILE"
     chmod 600 "$CONFIG_FILE"
+    CONFIG_JUST_CREATED=1
     echo_info "Created config from template: $CONFIG_FILE"
 else
     echo_info "Config exists: $CONFIG_FILE"
@@ -137,9 +155,13 @@ interactive_feishu_config() {
     local webhook_url secret
 
     echo ""
-    echo_info "Interactive Feishu bot setup (signature required)"
-    read -rp "Webhook URL: " webhook_url
-    read -rsp "Secret: " secret
+    echo_info "========================================"
+    echo_info "  Feishu bot setup (required)"
+    echo_info "========================================"
+    echo_info "Get Webhook URL and Secret from Feishu group bot settings."
+    echo ""
+    read_tty -p "Webhook URL: " webhook_url
+    read_secret_tty -p "Secret: " secret
     echo ""
 
     if [ -z "$webhook_url" ] || [ -z "$secret" ]; then
@@ -174,25 +196,26 @@ ensure_feishu_config() {
         return
     fi
 
-    echo_warn "Feishu config missing or still using template placeholders"
+    echo_warn "Feishu webhook_url / secret not configured yet"
 
-    if [ "$INTERACTIVE" = "1" ]; then
+    if [ "$CONFIG_JUST_CREATED" = "1" ] || [ "$INTERACTIVE" = "1" ]; then
         interactive_feishu_config
-    elif [ -t 0 ] && [ -t 1 ]; then
-        read -rp "Configure Feishu interactively now? [Y/n] " answer
+    elif [ -t 0 ] || { [ -r /dev/tty ] && [ -w /dev/tty ]; }; then
+        local answer
+        read_tty -p "Configure Feishu now? [Y/n] " answer
         case "${answer:-Y}" in
             [Yy]*)
                 interactive_feishu_config
                 ;;
             *)
-                echo_error "Complete config first:"
+                echo_error "Feishu config is required. Either:"
+                echo "  sudo ./deploy.sh --interactive"
                 echo "  vim $CONFIG_FILE"
-                echo "  or: sudo ./deploy.sh --interactive"
                 exit 1
                 ;;
         esac
     else
-        echo_error "Non-interactive terminal, configure first:"
+        echo_error "No interactive terminal. Configure Feishu first:"
         echo "  vim $CONFIG_FILE"
         echo "  or: sudo ./deploy.sh --interactive"
         exit 1
