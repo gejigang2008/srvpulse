@@ -7,9 +7,6 @@
 #   cd /opt/srvpulse
 #   sudo ./deploy.sh
 #
-# Default: system python3 (no venv). Optional isolated venv:
-#   sudo ./deploy.sh --venv
-#
 # Update:
 #   cd /opt/srvpulse && git pull && sudo ./deploy.sh
 # ============================================
@@ -22,30 +19,18 @@ LOG_FILE="/var/log/srvpulse.log"
 CONFIG_FILE="$INSTALL_DIR/config.yaml"
 
 INTERACTIVE=0
-USE_VENV=0
 for arg in "$@"; do
     case "$arg" in
         --interactive|-i) INTERACTIVE=1 ;;
-        --venv) USE_VENV=1 ;;
-        --system-python|-s) USE_VENV=0 ;;
         -h|--help)
             echo "Usage: sudo ./deploy.sh [options]"
             echo "  --interactive, -i     Interactive Feishu webhook/secret setup"
-            echo "  --venv                Use virtualenv (needs python3-venv)"
-            echo "  --system-python, -s   Use system python3 (default)"
             echo ""
             echo "Run this script from the srvpulse repo directory after git clone."
             exit 0
             ;;
     esac
 done
-
-if [ -n "${SRVPULSE_USE_VENV:-}" ]; then
-    USE_VENV=1
-fi
-if [ -n "${SRVPULSE_NO_VENV:-}" ]; then
-    USE_VENV=0
-fi
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -74,8 +59,6 @@ if ! $PYTHON -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 6) el
     echo_error "Python 3.6+ required, current: $PYTHON_VERSION"
     exit 1
 fi
-
-PYTHON_MAJOR_MINOR=$($PYTHON -c 'import sys; print("{}.{}".format(sys.version_info.major, sys.version_info.minor))')
 
 if [ ! -f "$INSTALL_DIR/monitor.py" ]; then
     echo_error "monitor.py not found, run inside srvpulse repo directory"
@@ -107,49 +90,9 @@ ensure_system_pip() {
     exit 1
 }
 
-venv_is_usable() {
-    [ -x "$INSTALL_DIR/venv/bin/python" ] && [ -x "$INSTALL_DIR/venv/bin/pip" ]
-}
-
-create_virtualenv() {
-    if venv_is_usable; then
-        echo_info "Virtualenv exists, skip create"
-        return
-    fi
-
-    if [ -d "$INSTALL_DIR/venv" ]; then
-        echo_warn "Removing incomplete venv directory ..."
-        rm -rf "$INSTALL_DIR/venv"
-    fi
-
-    echo_info "Creating virtualenv ..."
-    if $PYTHON -m venv "$INSTALL_DIR/venv" && venv_is_usable; then
-        return
-    fi
-
-    if [ -d "$INSTALL_DIR/venv" ]; then
-        rm -rf "$INSTALL_DIR/venv"
-    fi
-    echo_warn "venv unavailable (install python${PYTHON_MAJOR_MINOR}-venv for --venv mode)"
-    return 1
-}
-
 setup_python_runtime() {
-    if [ "$USE_VENV" = "1" ]; then
-        if create_virtualenv && venv_is_usable; then
-            RUN_PYTHON="$INSTALL_DIR/venv/bin/python"
-            echo_info "Using virtualenv: $RUN_PYTHON"
-            echo_info "Installing Python dependencies ..."
-            "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt" -q
-            return
-        fi
-        echo_warn "Falling back to system Python"
-        USE_VENV=0
-    fi
-
-    echo_info "Using system Python"
     if [ -d "$INSTALL_DIR/venv" ]; then
-        echo_warn "Removing unused venv directory ..."
+        echo_warn "Removing legacy venv directory ..."
         rm -rf "$INSTALL_DIR/venv"
     fi
     ensure_system_pip

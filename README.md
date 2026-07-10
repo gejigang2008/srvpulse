@@ -47,8 +47,7 @@ python monitor.py           # 手动执行一次监控
 # SSH 登录服务器后执行
 sudo git clone git@github.com:gejigang2008/srvpulse.git /opt/srvpulse
 cd /opt/srvpulse
-sudo ./deploy.sh              # 默认直接用系统 Python
-sudo ./deploy.sh --venv       # 可选：使用 venv（需 python3-venv）
+sudo ./deploy.sh
 ```
 
 终端下 `deploy.sh` 会检测飞书配置：若为模板占位符，会提示交互填写；也可强制交互：
@@ -148,7 +147,7 @@ srvpulse/
 ├── monitor.py              # 主监控脚本
 ├── config.yaml.example     # 配置模板
 ├── requirements.txt        # Python 依赖
-├── deploy.sh               # 安装脚本（venv + 配置 + Cron）
+├── deploy.sh               # 安装脚本（系统 Python + 配置 + Cron）
 ├── uninstall.sh            # 卸载脚本
 └── README.md
 ```
@@ -162,7 +161,7 @@ srvpulse/
 | 操作系统 | Linux（生产部署）/ Windows（开发调试） |
 | Python | 3.6 - 3.13+ |
 | Git | 服务器部署需要 |
-| 系统包 | 默认只需 `python3-pip`；`--venv` 模式需 `python3-venv` |
+| 系统包 | `python3-pip` |
 | 网络 | 可访问 `open.feishu.cn` 和 `github.com` |
 | 权限 | Linux 部署需 root |
 
