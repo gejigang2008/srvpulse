@@ -1,5 +1,5 @@
-# Shell 脚本在仓库中强制 LF，避免 Linux 上无法执行
-*.sh text eol=lf
+# Shell scripts: LF only, no BOM
+*.sh text eol=lf -diff
 
 # Python / 配置 / 文档
 *.py text eol=lf

@@ -1,13 +1,16 @@
 ﻿#!/bin/bash
 # ============================================
-# srvpulse 安装脚本（在已克隆的仓库目录内执行）
+# srvpulse install script (run inside cloned repo)
 #
-# 首次部署:
+# First deploy:
 #   sudo git clone git@github.com:gejigang2008/srvpulse.git /opt/srvpulse
 #   cd /opt/srvpulse
 #   sudo ./deploy.sh
 #
-# 更新版本:
+# Debian/Ubuntu without python3-venv:
+#   sudo ./deploy.sh --system-python
+#
+# Update:
 #   cd /opt/srvpulse && git pull && sudo ./deploy.sh
 # ============================================
 set -e
@@ -19,18 +22,25 @@ LOG_FILE="/var/log/srvpulse.log"
 CONFIG_FILE="$INSTALL_DIR/config.yaml"
 
 INTERACTIVE=0
+USE_VENV=1
 for arg in "$@"; do
     case "$arg" in
         --interactive|-i) INTERACTIVE=1 ;;
+        --system-python|-s) USE_VENV=0 ;;
         -h|--help)
-            echo "用法: sudo ./deploy.sh [--interactive]"
-            echo "  --interactive  强制交互式填写飞书 webhook 与 secret"
+            echo "Usage: sudo ./deploy.sh [options]"
+            echo "  --interactive, -i     Interactive Feishu webhook/secret setup"
+            echo "  --system-python, -s   Use system python3 (no venv)"
             echo ""
-            echo "说明: 请先在目标目录 git clone 代码，再在本脚本所在目录执行。"
+            echo "Run this script from the srvpulse repo directory after git clone."
             exit 0
             ;;
     esac
 done
+
+if [ -n "${SRVPULSE_NO_VENV:-}" ]; then
+    USE_VENV=0
+fi
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -41,120 +51,136 @@ echo_info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
 echo_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 echo_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
-# ============ 权限检查 ============
 if [ "$EUID" -ne 0 ]; then
-    echo_error "请使用 root 权限运行: sudo ./deploy.sh"
+    echo_error "Please run as root: sudo ./deploy.sh"
     exit 1
 fi
 
-# ============ Python 版本检查 ============
 PYTHON=$(command -v python3 || true)
 if [ -z "$PYTHON" ]; then
-    echo_error "未找到 python3，请先安装 Python 3.6+"
+    echo_error "python3 not found, need Python 3.6+"
     exit 1
 fi
 
 PYTHON_VERSION=$($PYTHON --version 2>&1 | awk '{print $2}')
-echo_info "Python 版本: $PYTHON_VERSION"
+echo_info "Python version: $PYTHON_VERSION"
 
 if ! $PYTHON -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 6) else 1)'; then
-    echo_error "需要 Python 3.6 或更高版本，当前: $PYTHON_VERSION"
+    echo_error "Python 3.6+ required, current: $PYTHON_VERSION"
     exit 1
 fi
 
 PYTHON_MAJOR_MINOR=$($PYTHON -c 'import sys; print("{}.{}".format(sys.version_info.major, sys.version_info.minor))')
 
-# ============ 安装目录检查 ============
 if [ ! -f "$INSTALL_DIR/monitor.py" ]; then
-    echo_error "未找到 monitor.py，请在 srvpulse 仓库目录内运行本脚本"
+    echo_error "monitor.py not found, run inside srvpulse repo directory"
     exit 1
 fi
 
 chmod +x "$INSTALL_DIR/monitor.py"
-echo_info "安装目录: $INSTALL_DIR"
+echo_info "Install directory: $INSTALL_DIR"
 
-# ============ Python 虚拟环境 ============
+install_apt_packages() {
+    local packages=("$@")
+    if ! command -v apt-get >/dev/null 2>&1; then
+        return 1
+    fi
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y "${packages[@]}"
+}
+
 install_venv_system_package() {
-    if command -v apt-get >/dev/null 2>&1; then
-        echo_info "安装系统包 python${PYTHON_MAJOR_MINOR}-venv ..."
-        export DEBIAN_FRONTEND=noninteractive
-        apt-get update -qq
-        if apt-get install -y "python${PYTHON_MAJOR_MINOR}-venv"; then
-            return 0
-        fi
-        echo_warn "尝试安装通用包 python3-venv ..."
-        apt-get install -y python3-venv
-        return $?
+    if install_apt_packages "python${PYTHON_MAJOR_MINOR}-venv"; then
+        return 0
     fi
+    echo_warn "Trying package python3-venv ..."
+    install_apt_packages python3-venv
+}
 
-    if command -v dnf >/dev/null 2>&1; then
-        echo_info "安装系统包 python3-virtualenv ..."
-        dnf install -y python3-virtualenv
-        return $?
+ensure_system_pip() {
+    if $PYTHON -m pip --version >/dev/null 2>&1; then
+        return 0
     fi
-
-    if command -v yum >/dev/null 2>&1; then
-        echo_info "安装系统包 python3-virtualenv ..."
-        yum install -y python3-virtualenv
-        return $?
+    echo_info "Installing python3-pip ..."
+    if install_apt_packages python3-pip; then
+        return 0
     fi
+    echo_error "pip not available. Try: apt install python3-pip"
+    exit 1
+}
 
-    return 1
+venv_is_usable() {
+    [ -x "$INSTALL_DIR/venv/bin/python" ] && [ -x "$INSTALL_DIR/venv/bin/pip" ]
 }
 
 create_virtualenv() {
-    if [ -x "$INSTALL_DIR/venv/bin/python" ]; then
-        echo_info "虚拟环境已存在，跳过创建"
+    if venv_is_usable; then
+        echo_info "Virtualenv exists, skip create"
         return
     fi
 
     if [ -d "$INSTALL_DIR/venv" ]; then
-        echo_warn "检测到不完整的 venv 目录，正在清理..."
+        echo_warn "Removing incomplete venv directory ..."
         rm -rf "$INSTALL_DIR/venv"
     fi
 
-    echo_info "创建 Python 虚拟环境..."
+    echo_info "Creating virtualenv ..."
     if $PYTHON -m venv "$INSTALL_DIR/venv"; then
         return
     fi
 
-    echo_warn "虚拟环境创建失败（常见于 Debian/Ubuntu 未安装 python3-venv）"
+    echo_warn "venv failed (often missing python3-venv on Debian/Ubuntu)"
     if install_venv_system_package; then
-        echo_info "重试创建 Python 虚拟环境..."
+        echo_info "Retry creating virtualenv ..."
         if $PYTHON -m venv "$INSTALL_DIR/venv"; then
             return
         fi
     fi
 
-    echo_error "无法创建虚拟环境，请手动安装后重新运行 deploy.sh:"
-    echo "  Debian/Ubuntu: apt install python${PYTHON_MAJOR_MINOR}-venv"
-    echo "  或:           apt install python3-venv"
+    echo_error "Cannot create virtualenv. Options:"
+    echo "  apt install python${PYTHON_MAJOR_MINOR}-venv && sudo ./deploy.sh"
+    echo "  sudo ./deploy.sh --system-python"
     exit 1
 }
 
-create_virtualenv
+setup_python_runtime() {
+    if [ "$USE_VENV" = "1" ]; then
+        create_virtualenv
+        if ! venv_is_usable; then
+            echo_error "Virtualenv is incomplete (missing python or pip)"
+            exit 1
+        fi
+        RUN_PYTHON="$INSTALL_DIR/venv/bin/python"
+        echo_info "Using virtualenv: $RUN_PYTHON"
+        echo_info "Installing Python dependencies ..."
+        "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt" -q
+        return
+    fi
 
-if [ ! -x "$INSTALL_DIR/venv/bin/pip" ]; then
-    echo_error "venv 中未找到 pip，虚拟环境创建不完整"
-    exit 1
-fi
+    echo_info "Using system Python (no venv)"
+    if [ -d "$INSTALL_DIR/venv" ]; then
+        echo_warn "Removing unused venv directory ..."
+        rm -rf "$INSTALL_DIR/venv"
+    fi
+    ensure_system_pip
+    RUN_PYTHON="$PYTHON"
+    echo_info "Installing Python dependencies ..."
+    $PYTHON -m pip install -r "$INSTALL_DIR/requirements.txt" -q
+}
 
-echo_info "安装 Python 依赖..."
-"$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt" -q
+setup_python_runtime
 
-VENV_PYTHON="$INSTALL_DIR/venv/bin/python"
-
-# ============ 配置文件 ============
 if [ ! -f "$CONFIG_FILE" ]; then
     cp "$INSTALL_DIR/config.yaml.example" "$CONFIG_FILE"
     chmod 600 "$CONFIG_FILE"
-    echo_info "已从模板创建配置文件: $CONFIG_FILE"
+    echo_info "Created config from template: $CONFIG_FILE"
 else
-    echo_info "配置文件已存在: $CONFIG_FILE"
+    echo_info "Config exists: $CONFIG_FILE"
 fi
 
 config_needs_feishu_setup() {
-    ! $VENV_PYTHON - "$CONFIG_FILE" <<'PY'
+    ! $RUN_PYTHON - "$CONFIG_FILE" <<'PY'
 import sys
 import yaml
 
@@ -179,17 +205,17 @@ interactive_feishu_config() {
     local webhook_url secret
 
     echo ""
-    echo_info "交互式配置飞书机器人（需开启签名校验）"
+    echo_info "Interactive Feishu bot setup (signature required)"
     read -rp "Webhook URL: " webhook_url
     read -rsp "Secret: " secret
     echo ""
 
     if [ -z "$webhook_url" ] || [ -z "$secret" ]; then
-        echo_error "Webhook URL 和 Secret 不能为空"
+        echo_error "Webhook URL and Secret cannot be empty"
         exit 1
     fi
 
-    WEBHOOK_URL="$webhook_url" SECRET="$secret" $VENV_PYTHON - "$CONFIG_FILE" <<'PY'
+    WEBHOOK_URL="$webhook_url" SECRET="$secret" $RUN_PYTHON - "$CONFIG_FILE" <<'PY'
 import os
 import sys
 import yaml
@@ -207,66 +233,63 @@ with open(path, "w", encoding="utf-8") as f:
 PY
 
     chmod 600 "$CONFIG_FILE"
-    echo_info "飞书配置已写入 $CONFIG_FILE"
+    echo_info "Feishu config saved to $CONFIG_FILE"
 }
 
 ensure_feishu_config() {
     if ! config_needs_feishu_setup; then
-        echo_info "飞书配置检查通过"
+        echo_info "Feishu config OK"
         return
     fi
 
-    echo_warn "飞书配置未填写或仍为模板占位符"
+    echo_warn "Feishu config missing or still using template placeholders"
 
     if [ "$INTERACTIVE" = "1" ]; then
         interactive_feishu_config
     elif [ -t 0 ] && [ -t 1 ]; then
-        read -rp "是否现在交互式配置飞书? [Y/n] " answer
+        read -rp "Configure Feishu interactively now? [Y/n] " answer
         case "${answer:-Y}" in
             [Yy]*)
                 interactive_feishu_config
                 ;;
             *)
-                echo_error "请先完成配置后再部署:"
+                echo_error "Complete config first:"
                 echo "  vim $CONFIG_FILE"
-                echo "  或: sudo ./deploy.sh --interactive"
+                echo "  or: sudo ./deploy.sh --interactive"
                 exit 1
                 ;;
         esac
     else
-        echo_error "非交互终端无法自动配置，请先完成配置:"
+        echo_error "Non-interactive terminal, configure first:"
         echo "  vim $CONFIG_FILE"
-        echo "  或: sudo ./deploy.sh --interactive"
+        echo "  or: sudo ./deploy.sh --interactive"
         exit 1
     fi
 
     if config_needs_feishu_setup; then
-        echo_error "飞书配置仍不完整，部署中止"
+        echo_error "Feishu config still incomplete"
         exit 1
     fi
 }
 
 ensure_feishu_config
 
-# ============ 配置校验 ============
-echo_info "校验配置文件..."
-if $VENV_PYTHON "$INSTALL_DIR/monitor.py" --check; then
-    echo_info "配置校验通过"
+echo_info "Validating config ..."
+if $RUN_PYTHON "$INSTALL_DIR/monitor.py" --check; then
+    echo_info "Config validation passed"
 else
-    echo_error "配置校验失败，请检查 $CONFIG_FILE"
+    echo_error "Config validation failed, check $CONFIG_FILE"
     exit 1
 fi
 
-# ============ Cron 定时任务 ============
-echo_info "配置 Cron 定时任务..."
+echo_info "Configuring cron ..."
 cat > "$CRON_FILE" << EOF
-# srvpulse 资源监控 - 每5分钟执行一次
-*/5 * * * * root cd $INSTALL_DIR && $INSTALL_DIR/venv/bin/python monitor.py >> $LOG_FILE 2>&1
+# srvpulse - every 5 minutes
+*/5 * * * * root cd $INSTALL_DIR && $RUN_PYTHON monitor.py >> $LOG_FILE 2>&1
 EOF
 chmod 644 "$CRON_FILE"
 
-# ============ 日志轮转 ============
-echo_info "配置日志轮转..."
+echo_info "Configuring logrotate ..."
 cat > "$LOGROTATE_FILE" << EOF
 $LOG_FILE {
     daily
@@ -279,19 +302,19 @@ $LOG_FILE {
 EOF
 chmod 644 "$LOGROTATE_FILE"
 
-# ============ 完成 ============
 echo ""
 echo_info "========================================"
-echo_info "  srvpulse 部署完成！"
+echo_info "  srvpulse deploy complete"
 echo_info "========================================"
 echo ""
-echo_info "安装目录:  $INSTALL_DIR"
-echo_info "配置文件:  $CONFIG_FILE"
-echo_info "日志文件:  $LOG_FILE"
-echo_info "Cron 配置: $CRON_FILE"
+echo_info "Install dir: $INSTALL_DIR"
+echo_info "Config:      $CONFIG_FILE"
+echo_info "Log:         $LOG_FILE"
+echo_info "Cron:        $CRON_FILE"
+echo_info "Python:      $RUN_PYTHON"
 echo ""
-echo_info "建议验证:"
-echo "  测试告警: $INSTALL_DIR/venv/bin/python $INSTALL_DIR/monitor.py --test"
-echo "  手动执行: $INSTALL_DIR/venv/bin/python $INSTALL_DIR/monitor.py"
-echo "  查看日志: tail -f $LOG_FILE"
+echo_info "Verify:"
+echo "  $RUN_PYTHON $INSTALL_DIR/monitor.py --test"
+echo "  $RUN_PYTHON $INSTALL_DIR/monitor.py"
+echo "  tail -f $LOG_FILE"
 echo ""
