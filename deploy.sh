@@ -1,23 +1,22 @@
 ﻿#!/bin/bash
 # ============================================
-# srvpulse 一键部署到 /opt/srvpulse
+# srvpulse 安装脚本（在已克隆的仓库目录内执行）
 #
-# 推荐用法:
+# 首次部署:
 #   sudo git clone git@github.com:gejigang2008/srvpulse.git /opt/srvpulse
 #   cd /opt/srvpulse
-#   sudo ./deploy.sh              # 终端下可交互配置飞书
-#   sudo ./deploy.sh --interactive  # 强制交互配置
+#   sudo ./deploy.sh
+#
+# 更新版本:
+#   cd /opt/srvpulse && git pull && sudo ./deploy.sh
 # ============================================
 set -e
 
-INSTALL_DIR="/opt/srvpulse"
-GIT_REPO="${SRVPULSE_GIT_REPO:-git@github.com:gejigang2008/srvpulse.git}"
-GIT_BRANCH="${SRVPULSE_GIT_BRANCH:-main}"
+INSTALL_DIR="$(cd "$(dirname "$0")" && pwd)"
 CRON_FILE="/etc/cron.d/srvpulse"
 LOGROTATE_FILE="/etc/logrotate.d/srvpulse"
 LOG_FILE="/var/log/srvpulse.log"
 CONFIG_FILE="$INSTALL_DIR/config.yaml"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 INTERACTIVE=0
 for arg in "$@"; do
@@ -26,6 +25,8 @@ for arg in "$@"; do
         -h|--help)
             echo "用法: sudo ./deploy.sh [--interactive]"
             echo "  --interactive  强制交互式填写飞书 webhook 与 secret"
+            echo ""
+            echo "说明: 请先在目标目录 git clone 代码，再在本脚本所在目录执行。"
             exit 0
             ;;
     esac
@@ -46,12 +47,6 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# ============ Git 检查 ============
-if ! command -v git >/dev/null 2>&1; then
-    echo_error "未找到 git，请先安装: yum install -y git  或  apt install -y git"
-    exit 1
-fi
-
 # ============ Python 版本检查 ============
 PYTHON=$(command -v python3 || true)
 if [ -z "$PYTHON" ]; then
@@ -67,42 +62,16 @@ if ! $PYTHON -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 6) el
     exit 1
 fi
 
-# ============ 同步代码到安装目录 ============
-sync_install_dir() {
-  if [ -d "$INSTALL_DIR/.git" ]; then
-    echo_info "更新代码: $INSTALL_DIR"
-    git -C "$INSTALL_DIR" fetch origin "$GIT_BRANCH"
-    git -C "$INSTALL_DIR" checkout "$GIT_BRANCH"
-    git -C "$INSTALL_DIR" pull --ff-only origin "$GIT_BRANCH"
-    return
-  fi
-
-  if [ "$SCRIPT_DIR" = "$INSTALL_DIR" ] && [ -d "$SCRIPT_DIR/.git" ]; then
-    echo_info "在安装目录中部署: $INSTALL_DIR"
-    return
-  fi
-
-  if [ -d "$INSTALL_DIR" ] && [ "$(ls -A "$INSTALL_DIR" 2>/dev/null)" ]; then
-    echo_error "$INSTALL_DIR 已存在且不是 git 仓库，请手动处理后重试"
-    exit 1
-  fi
-
-  echo_info "从 Git 克隆到 $INSTALL_DIR ..."
-  mkdir -p "$(dirname "$INSTALL_DIR")"
-  git clone -b "$GIT_BRANCH" "$GIT_REPO" "$INSTALL_DIR"
-}
-
-sync_install_dir
-
+# ============ 安装目录检查 ============
 if [ ! -f "$INSTALL_DIR/monitor.py" ]; then
-    echo_error "未找到 $INSTALL_DIR/monitor.py，部署失败"
+    echo_error "未找到 monitor.py，请在 srvpulse 仓库目录内运行本脚本"
     exit 1
 fi
 
 chmod +x "$INSTALL_DIR/monitor.py"
 echo_info "安装目录: $INSTALL_DIR"
 
-# ============ Python 虚拟环境（配置校验依赖 PyYAML） ============
+# ============ Python 虚拟环境 ============
 if [ ! -d "$INSTALL_DIR/venv" ]; then
     echo_info "创建 Python 虚拟环境..."
     $PYTHON -m venv "$INSTALL_DIR/venv"
@@ -265,6 +234,4 @@ echo_info "建议验证:"
 echo "  测试告警: $INSTALL_DIR/venv/bin/python $INSTALL_DIR/monitor.py --test"
 echo "  手动执行: $INSTALL_DIR/venv/bin/python $INSTALL_DIR/monitor.py"
 echo "  查看日志: tail -f $LOG_FILE"
-echo ""
-echo_info "后续更新: cd $INSTALL_DIR && git pull && sudo ./deploy.sh"
 echo ""

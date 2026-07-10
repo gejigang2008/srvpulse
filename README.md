@@ -19,7 +19,7 @@
 | **防抖动告警** | 连续超标 N 次才触发，避免瞬时波动误报 |
 | **可靠送达** | 飞书 API 返回成功才标记已告警；失败自动重试 |
 | **事务级状态** | 跨平台文件锁保护状态读写（Linux / Windows） |
-| **Git 部署** | 服务器上 `git clone` 一键拉取，`deploy.sh` 自动配置 |
+| **Git 部署** | `git clone` 获取代码，`deploy.sh` 负责安装配置 |
 | **Python 兼容** | 支持 Python 3.6 - 3.13+ |
 
 ---
@@ -147,7 +147,7 @@ srvpulse/
 ├── monitor.py              # 主监控脚本
 ├── config.yaml.example     # 配置模板
 ├── requirements.txt        # Python 依赖
-├── deploy.sh               # 一键部署（Git + venv + Cron）
+├── deploy.sh               # 安装脚本（venv + 配置 + Cron）
 ├── uninstall.sh            # 卸载脚本
 └── README.md
 ```
