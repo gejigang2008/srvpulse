@@ -50,11 +50,12 @@ cd /opt/srvpulse
 sudo ./deploy.sh
 ```
 
-终端下 `deploy.sh` 会检测飞书配置：若为模板占位符，会提示交互填写；也可强制交互：
+终端下 `deploy.sh` 会处理飞书配置：
 
-```bash
-sudo ./deploy.sh --interactive
-```
+- **已填写真实值**：展示 Webhook / Secret（脱敏），确认是否使用
+- **仍是模板占位符**：引导交互填写；若只填了部分字段，会保留已填值
+
+强制重新配置：`sudo ./deploy.sh --interactive`
 
 非交互环境（如 CI）需事先准备好 `config.yaml`：
 
