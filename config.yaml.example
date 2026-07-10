@@ -1,0 +1,38 @@
+﻿# ========== 基础配置 ==========
+# 日志级别: DEBUG, INFO, WARNING, ERROR
+log_level: INFO
+
+# 连续超标次数（达到此次数后触发告警）
+consecutive_count: 3
+
+# ========== 监控项配置 ==========
+monitors:
+  # CPU监控
+  cpu:
+    enabled: true
+    threshold: 90              # 告警阈值（百分比）
+
+  # 内存监控
+  memory:
+    enabled: true
+    threshold: 85
+
+  # 磁盘监控（支持自动发现真实硬盘，排除 Docker overlay 等虚挂载）
+  disk:
+    enabled: true
+    auto_discover: true         # 自动发现所有真实磁盘挂载点
+    default_threshold: 90        # 自动发现挂载点的默认告警阈值
+    paths: []                    # 可选：手动补充或单独指定阈值
+      # - path: /data
+      #   threshold: 85
+    # exclude_fstypes:           # 可选：额外排除的文件系统类型
+    #   - overlay
+    # exclude_path_contains:     # 可选：路径包含以下片段则跳过
+    #   - /docker/
+
+# ========== 飞书机器人配置（必填） ==========
+feishu:
+  webhook_url: "https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxxxx"
+  secret: "YOUR_SECRET_KEY"
+  timeout: 5                    # 请求超时时间（秒），必须 > 0
+  max_retries: 3                # 失败重试次数，必须 >= 0
