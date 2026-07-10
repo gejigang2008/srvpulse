@@ -1,5 +1,6 @@
 # Shell scripts: LF only, no BOM
 *.sh text eol=lf -diff
+srvpulse text eol=lf -diff
 
 # Python / 配置 / 文档
 *.py text eol=lf

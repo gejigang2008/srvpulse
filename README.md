@@ -19,7 +19,7 @@
 | **防抖动告警** | 连续超标 N 次才触发，避免瞬时波动误报 |
 | **可靠送达** | 飞书 API 返回成功才标记已告警；失败自动重试 |
 | **事务级状态** | 跨平台文件锁保护状态读写（Linux / Windows） |
-| **Git 部署** | `git clone` 获取代码，`deploy.sh` 负责安装配置 |
+| **Git 部署** | `git clone` 获取代码，`srvpulse install` 一键安装 |
 | **Python 兼容** | 支持 Python 3.6 - 3.13+ |
 
 ---
@@ -47,22 +47,34 @@ python monitor.py           # 手动执行一次监控
 # SSH 登录服务器后执行
 sudo git clone git@github.com:gejigang2008/srvpulse.git /opt/srvpulse
 cd /opt/srvpulse
-sudo ./deploy.sh
+sudo ./srvpulse install
 ```
 
-终端下 `deploy.sh` 会处理飞书配置：
+安装后可在任意目录使用 `srvpulse` 命令（链接到 `/usr/local/bin/srvpulse`）。
+
+### 常用命令
+
+| 命令 | 说明 |
+|------|------|
+| `sudo srvpulse install` | 安装/更新（依赖、飞书配置、Cron） |
+| `sudo srvpulse status` | 查看安装与运行详情 |
+| `sudo srvpulse start` | 启动定时监控（启用 Cron） |
+| `sudo srvpulse stop` | 停止定时监控（禁用 Cron） |
+| `sudo srvpulse uninstall` | 完全卸载 |
+
+`srvpulse install` 会处理飞书配置：
 
 - **已填写真实值**：展示 Webhook / Secret（脱敏），确认是否使用
 - **仍是模板占位符**：引导交互填写；若只填了部分字段，会保留已填值
 
-强制重新配置：`sudo ./deploy.sh --interactive`
+强制重新配置：`sudo srvpulse install --interactive`
 
 非交互环境（如 CI）需事先准备好 `config.yaml`：
 
 ```bash
 sudo cp config.yaml.example config.yaml
 sudo vim config.yaml
-sudo ./deploy.sh
+sudo ./srvpulse install
 ```
 
 部署完成后：
@@ -77,14 +89,13 @@ tail -f /var/log/srvpulse.log
 ```bash
 cd /opt/srvpulse
 sudo git pull
-sudo ./deploy.sh
+sudo ./srvpulse install
 ```
 
 ### 卸载
 
 ```bash
-cd /opt/srvpulse
-sudo ./uninstall.sh
+sudo srvpulse uninstall
 ```
 
 ---
@@ -148,8 +159,7 @@ srvpulse/
 ├── monitor.py              # 主监控脚本
 ├── config.yaml.example     # 配置模板
 ├── requirements.txt        # Python 依赖
-├── deploy.sh               # 安装脚本（系统 Python + 配置 + Cron）
-├── uninstall.sh            # 卸载脚本
+├── srvpulse                # CLI（install / uninstall / start / stop / status）
 └── README.md
 ```
 
