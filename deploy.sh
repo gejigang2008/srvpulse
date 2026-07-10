@@ -2,13 +2,11 @@
 # ============================================
 # srvpulse 一键部署到 /opt/srvpulse
 #
-# 推荐用法（Git 部署）:
+# 推荐用法:
 #   sudo git clone git@github.com:gejigang2008/srvpulse.git /opt/srvpulse
 #   cd /opt/srvpulse
-#   sudo cp config.yaml.example config.yaml && sudo vim config.yaml
-#   sudo ./deploy.sh
-#
-# 也可在任意已克隆目录执行，脚本会自动同步到 /opt/srvpulse
+#   sudo ./deploy.sh              # 终端下可交互配置飞书
+#   sudo ./deploy.sh --interactive  # 强制交互配置
 # ============================================
 set -e
 
@@ -18,7 +16,20 @@ GIT_BRANCH="${SRVPULSE_GIT_BRANCH:-main}"
 CRON_FILE="/etc/cron.d/srvpulse"
 LOGROTATE_FILE="/etc/logrotate.d/srvpulse"
 LOG_FILE="/var/log/srvpulse.log"
+CONFIG_FILE="$INSTALL_DIR/config.yaml"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+INTERACTIVE=0
+for arg in "$@"; do
+    case "$arg" in
+        --interactive|-i) INTERACTIVE=1 ;;
+        -h|--help)
+            echo "用法: sudo ./deploy.sh [--interactive]"
+            echo "  --interactive  强制交互式填写飞书 webhook 与 secret"
+            exit 0
+            ;;
+    esac
+done
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -83,26 +94,15 @@ sync_install_dir() {
 
 sync_install_dir
 
-# ============ 安装/更新依赖 ============
-echo_info "安装目录: $INSTALL_DIR"
-
 if [ ! -f "$INSTALL_DIR/monitor.py" ]; then
     echo_error "未找到 $INSTALL_DIR/monitor.py，部署失败"
     exit 1
 fi
 
 chmod +x "$INSTALL_DIR/monitor.py"
+echo_info "安装目录: $INSTALL_DIR"
 
-# 配置文件（不覆盖已有配置）
-if [ ! -f "$INSTALL_DIR/config.yaml" ]; then
-    cp "$INSTALL_DIR/config.yaml.example" "$INSTALL_DIR/config.yaml"
-    chmod 600 "$INSTALL_DIR/config.yaml"
-    echo_warn "请填写配置文件: $INSTALL_DIR/config.yaml"
-else
-    echo_info "配置文件已存在，跳过覆盖"
-fi
-
-# ============ Python 虚拟环境 ============
+# ============ Python 虚拟环境（配置校验依赖 PyYAML） ============
 if [ ! -d "$INSTALL_DIR/venv" ]; then
     echo_info "创建 Python 虚拟环境..."
     $PYTHON -m venv "$INSTALL_DIR/venv"
@@ -113,12 +113,118 @@ fi
 echo_info "安装 Python 依赖..."
 "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt" -q
 
+VENV_PYTHON="$INSTALL_DIR/venv/bin/python"
+
+# ============ 配置文件 ============
+if [ ! -f "$CONFIG_FILE" ]; then
+    cp "$INSTALL_DIR/config.yaml.example" "$CONFIG_FILE"
+    chmod 600 "$CONFIG_FILE"
+    echo_info "已从模板创建配置文件: $CONFIG_FILE"
+else
+    echo_info "配置文件已存在: $CONFIG_FILE"
+fi
+
+config_needs_feishu_setup() {
+    ! $VENV_PYTHON - "$CONFIG_FILE" <<'PY'
+import sys
+import yaml
+
+with open(sys.argv[1], encoding="utf-8") as f:
+    cfg = yaml.safe_load(f) or {}
+
+feishu = cfg.get("feishu", {})
+url = str(feishu.get("webhook_url", "")).strip()
+secret = str(feishu.get("secret", "")).strip()
+
+needs = (
+    not url
+    or not secret
+    or "xxxxxxxxxx" in url
+    or secret == "YOUR_SECRET_KEY"
+)
+sys.exit(0 if needs else 1)
+PY
+}
+
+interactive_feishu_config() {
+    local webhook_url secret
+
+    echo ""
+    echo_info "交互式配置飞书机器人（需开启签名校验）"
+    read -rp "Webhook URL: " webhook_url
+    read -rsp "Secret: " secret
+    echo ""
+
+    if [ -z "$webhook_url" ] || [ -z "$secret" ]; then
+        echo_error "Webhook URL 和 Secret 不能为空"
+        exit 1
+    fi
+
+    WEBHOOK_URL="$webhook_url" SECRET="$secret" $VENV_PYTHON - "$CONFIG_FILE" <<'PY'
+import os
+import sys
+import yaml
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as f:
+    cfg = yaml.safe_load(f) or {}
+
+cfg.setdefault("feishu", {})
+cfg["feishu"]["webhook_url"] = os.environ["WEBHOOK_URL"]
+cfg["feishu"]["secret"] = os.environ["SECRET"]
+
+with open(path, "w", encoding="utf-8") as f:
+    yaml.dump(cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+PY
+
+    chmod 600 "$CONFIG_FILE"
+    echo_info "飞书配置已写入 $CONFIG_FILE"
+}
+
+ensure_feishu_config() {
+    if ! config_needs_feishu_setup; then
+        echo_info "飞书配置检查通过"
+        return
+    fi
+
+    echo_warn "飞书配置未填写或仍为模板占位符"
+
+    if [ "$INTERACTIVE" = "1" ]; then
+        interactive_feishu_config
+    elif [ -t 0 ] && [ -t 1 ]; then
+        read -rp "是否现在交互式配置飞书? [Y/n] " answer
+        case "${answer:-Y}" in
+            [Yy]*)
+                interactive_feishu_config
+                ;;
+            *)
+                echo_error "请先完成配置后再部署:"
+                echo "  vim $CONFIG_FILE"
+                echo "  或: sudo ./deploy.sh --interactive"
+                exit 1
+                ;;
+        esac
+    else
+        echo_error "非交互终端无法自动配置，请先完成配置:"
+        echo "  vim $CONFIG_FILE"
+        echo "  或: sudo ./deploy.sh --interactive"
+        exit 1
+    fi
+
+    if config_needs_feishu_setup; then
+        echo_error "飞书配置仍不完整，部署中止"
+        exit 1
+    fi
+}
+
+ensure_feishu_config
+
 # ============ 配置校验 ============
 echo_info "校验配置文件..."
-if "$INSTALL_DIR/venv/bin/python" "$INSTALL_DIR/monitor.py" --check; then
+if $VENV_PYTHON "$INSTALL_DIR/monitor.py" --check; then
     echo_info "配置校验通过"
 else
-    echo_error "配置校验失败，请检查 $INSTALL_DIR/config.yaml 后重新部署"
+    echo_error "配置校验失败，请检查 $CONFIG_FILE"
     exit 1
 fi
 
@@ -129,12 +235,6 @@ cat > "$CRON_FILE" << EOF
 */5 * * * * root cd $INSTALL_DIR && $INSTALL_DIR/venv/bin/python monitor.py >> $LOG_FILE 2>&1
 EOF
 chmod 644 "$CRON_FILE"
-
-# 清理旧版 cron 配置（如曾部署过 /opt/monitor）
-if [ -f /etc/cron.d/monitor ]; then
-    echo_warn "检测到旧版 /etc/cron.d/monitor，已移除"
-    rm -f /etc/cron.d/monitor
-fi
 
 # ============ 日志轮转 ============
 echo_info "配置日志轮转..."
@@ -150,11 +250,6 @@ $LOG_FILE {
 EOF
 chmod 644 "$LOGROTATE_FILE"
 
-if [ -f /etc/logrotate.d/monitor ]; then
-    echo_warn "检测到旧版 /etc/logrotate.d/monitor，已移除"
-    rm -f /etc/logrotate.d/monitor
-fi
-
 # ============ 完成 ============
 echo ""
 echo_info "========================================"
@@ -162,14 +257,14 @@ echo_info "  srvpulse 部署完成！"
 echo_info "========================================"
 echo ""
 echo_info "安装目录:  $INSTALL_DIR"
-echo_info "配置文件:  $INSTALL_DIR/config.yaml"
+echo_info "配置文件:  $CONFIG_FILE"
 echo_info "日志文件:  $LOG_FILE"
 echo_info "Cron 配置: $CRON_FILE"
 echo ""
-echo_warn "下一步:"
-echo "  编辑配置: vim $INSTALL_DIR/config.yaml"
+echo_info "建议验证:"
 echo "  测试告警: $INSTALL_DIR/venv/bin/python $INSTALL_DIR/monitor.py --test"
 echo "  手动执行: $INSTALL_DIR/venv/bin/python $INSTALL_DIR/monitor.py"
 echo "  查看日志: tail -f $LOG_FILE"
-echo "  更新版本: cd $INSTALL_DIR && git pull && sudo ./deploy.sh"
+echo ""
+echo_info "后续更新: cd $INSTALL_DIR && git pull && sudo ./deploy.sh"
 echo ""

@@ -47,11 +47,21 @@ python monitor.py           # 手动执行一次监控
 # SSH 登录服务器后执行
 sudo git clone git@github.com:gejigang2008/srvpulse.git /opt/srvpulse
 cd /opt/srvpulse
+sudo ./deploy.sh              # 交互式配置飞书 → 校验 → 安装 Cron
+```
 
+终端下 `deploy.sh` 会检测飞书配置：若为模板占位符，会提示交互填写；也可强制交互：
+
+```bash
+sudo ./deploy.sh --interactive
+```
+
+非交互环境（如 CI）需事先准备好 `config.yaml`：
+
+```bash
 sudo cp config.yaml.example config.yaml
-sudo vim config.yaml          # 填入飞书 webhook_url 和 secret
-
-sudo ./deploy.sh              # 安装依赖、配置 Cron、logrotate
+sudo vim config.yaml
+sudo ./deploy.sh
 ```
 
 部署完成后：
@@ -104,7 +114,7 @@ feishu:
   max_retries: 3
 ```
 
-完整方案见 [开发服务器资源监控告警系统 — 完整方案.md](./开发服务器资源监控告警系统%20—%20完整方案.md)
+完整方案见 [srvpulse 完整方案](./开发服务器资源监控告警系统%20—%20完整方案.md)
 
 ---
 
@@ -127,8 +137,6 @@ feishu:
 | 状态文件 | `/opt/srvpulse/state.json` |
 | 日志文件 | `/var/log/srvpulse.log` |
 | Cron 配置 | `/etc/cron.d/srvpulse` |
-
-> 从旧版 `/opt/monitor` 迁移：`deploy.sh` 会自动移除旧 Cron 配置；旧目录可手动 `rm -rf /opt/monitor`。
 
 ---
 
