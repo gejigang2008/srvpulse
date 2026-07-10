@@ -7,8 +7,8 @@
 #   cd /opt/srvpulse
 #   sudo ./deploy.sh
 #
-# Debian/Ubuntu without python3-venv:
-#   sudo ./deploy.sh --system-python
+# Default: system python3 (no venv). Optional isolated venv:
+#   sudo ./deploy.sh --venv
 #
 # Update:
 #   cd /opt/srvpulse && git pull && sudo ./deploy.sh
@@ -22,15 +22,17 @@ LOG_FILE="/var/log/srvpulse.log"
 CONFIG_FILE="$INSTALL_DIR/config.yaml"
 
 INTERACTIVE=0
-USE_VENV=1
+USE_VENV=0
 for arg in "$@"; do
     case "$arg" in
         --interactive|-i) INTERACTIVE=1 ;;
+        --venv) USE_VENV=1 ;;
         --system-python|-s) USE_VENV=0 ;;
         -h|--help)
             echo "Usage: sudo ./deploy.sh [options]"
             echo "  --interactive, -i     Interactive Feishu webhook/secret setup"
-            echo "  --system-python, -s   Use system python3 (no venv)"
+            echo "  --venv                Use virtualenv (needs python3-venv)"
+            echo "  --system-python, -s   Use system python3 (default)"
             echo ""
             echo "Run this script from the srvpulse repo directory after git clone."
             exit 0
@@ -38,6 +40,9 @@ for arg in "$@"; do
     esac
 done
 
+if [ -n "${SRVPULSE_USE_VENV:-}" ]; then
+    USE_VENV=1
+fi
 if [ -n "${SRVPULSE_NO_VENV:-}" ]; then
     USE_VENV=0
 fi
@@ -90,14 +95,6 @@ install_apt_packages() {
     apt-get install -y "${packages[@]}"
 }
 
-install_venv_system_package() {
-    if install_apt_packages "python${PYTHON_MAJOR_MINOR}-venv"; then
-        return 0
-    fi
-    echo_warn "Trying package python3-venv ..."
-    install_apt_packages python3-venv
-}
-
 ensure_system_pip() {
     if $PYTHON -m pip --version >/dev/null 2>&1; then
         return 0
@@ -126,39 +123,31 @@ create_virtualenv() {
     fi
 
     echo_info "Creating virtualenv ..."
-    if $PYTHON -m venv "$INSTALL_DIR/venv"; then
+    if $PYTHON -m venv "$INSTALL_DIR/venv" && venv_is_usable; then
         return
     fi
 
-    echo_warn "venv failed (often missing python3-venv on Debian/Ubuntu)"
-    if install_venv_system_package; then
-        echo_info "Retry creating virtualenv ..."
-        if $PYTHON -m venv "$INSTALL_DIR/venv"; then
-            return
-        fi
+    if [ -d "$INSTALL_DIR/venv" ]; then
+        rm -rf "$INSTALL_DIR/venv"
     fi
-
-    echo_error "Cannot create virtualenv. Options:"
-    echo "  apt install python${PYTHON_MAJOR_MINOR}-venv && sudo ./deploy.sh"
-    echo "  sudo ./deploy.sh --system-python"
-    exit 1
+    echo_warn "venv unavailable (install python${PYTHON_MAJOR_MINOR}-venv for --venv mode)"
+    return 1
 }
 
 setup_python_runtime() {
     if [ "$USE_VENV" = "1" ]; then
-        create_virtualenv
-        if ! venv_is_usable; then
-            echo_error "Virtualenv is incomplete (missing python or pip)"
-            exit 1
+        if create_virtualenv && venv_is_usable; then
+            RUN_PYTHON="$INSTALL_DIR/venv/bin/python"
+            echo_info "Using virtualenv: $RUN_PYTHON"
+            echo_info "Installing Python dependencies ..."
+            "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt" -q
+            return
         fi
-        RUN_PYTHON="$INSTALL_DIR/venv/bin/python"
-        echo_info "Using virtualenv: $RUN_PYTHON"
-        echo_info "Installing Python dependencies ..."
-        "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt" -q
-        return
+        echo_warn "Falling back to system Python"
+        USE_VENV=0
     fi
 
-    echo_info "Using system Python (no venv)"
+    echo_info "Using system Python"
     if [ -d "$INSTALL_DIR/venv" ]; then
         echo_warn "Removing unused venv directory ..."
         rm -rf "$INSTALL_DIR/venv"
