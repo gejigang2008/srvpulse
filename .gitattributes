@@ -1,0 +1,9 @@
+# Shell 脚本在仓库中强制 LF，避免 Linux 上无法执行
+*.sh text eol=lf
+
+# Python / 配置 / 文档
+*.py text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.txt text eol=lf

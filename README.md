@@ -164,6 +164,12 @@ srvpulse/
 | 网络 | 可访问 `open.feishu.cn` 和 `github.com` |
 | 权限 | Linux 部署需 root |
 
+### 运行测试
+
+```bash
+python -m unittest discover -s tests -v
+```
+
 ---
 
 ## License
