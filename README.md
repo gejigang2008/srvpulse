@@ -178,4 +178,4 @@ MIT
 
 ---
 
-*srvpulse v1.2 | [GitHub](https://github.com/gejigang2008/srvpulse)*
+*srvpulse v1.2.0 | [GitHub](https://github.com/gejigang2008/srvpulse)*
