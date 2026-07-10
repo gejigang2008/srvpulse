@@ -150,14 +150,50 @@ ensure_system_pip() {
     exit 1
 }
 
+install_python_deps() {
+    echo_info "Installing Python dependencies ..."
+
+    if $PYTHON - <<'PY'
+import sys
+for mod in ("psutil", "requests", "yaml"):
+    try:
+        __import__(mod)
+    except ImportError:
+        sys.exit(1)
+sys.exit(0)
+PY
+    then
+        echo_info "Python dependencies already satisfied"
+        return 0
+    fi
+
+    local err_file
+    err_file="$(mktemp /tmp/srvpulse-pip.XXXXXX 2>/dev/null || echo /tmp/srvpulse-pip.err)"
+    if $PYTHON -m pip install -r "$INSTALL_DIR/requirements.txt" -q 2>"$err_file"; then
+        rm -f "$err_file"
+        return 0
+    fi
+
+    if grep -qE "uninstall-distutils-installed-package|Cannot uninstall" "$err_file" 2>/dev/null; then
+        echo_warn "System Python package conflict, retry with --ignore-installed ..."
+        rm -f "$err_file"
+        $PYTHON -m pip install --ignore-installed -r "$INSTALL_DIR/requirements.txt" -q
+        return 0
+    fi
+
+    cat "$err_file" >&2
+    rm -f "$err_file"
+    echo_error "pip install failed"
+    exit 1
+}
+
 setup_python_runtime() {
     if [ -d "$INSTALL_DIR/venv" ]; then
         echo_warn "Removing legacy venv directory ..."
         rm -rf "$INSTALL_DIR/venv"
     fi
     ensure_system_pip
-    echo_info "Installing Python dependencies ..."
-    $PYTHON -m pip install -r "$INSTALL_DIR/requirements.txt" -q
+    install_python_deps
 }
 
 load_feishu_config() {
